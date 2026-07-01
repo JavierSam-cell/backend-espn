@@ -1,7 +1,7 @@
-// server.js - VERSIÓN CON CHEERIO (SIN PUPPETEER)
+// server.js - VERSIÓN CON AXIOS (más estable que got)
 const express = require('express');
 const cors = require('cors');
-const got = require('got');
+const axios = require('axios');
 const cheerio = require('cheerio');
 
 const app = express();
@@ -38,30 +38,24 @@ async function scrapearPartidosEnVivo() {
     try {
         console.log('🌐 Conectando a ESPN...');
         
-        const response = await got('https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world', {
+        const response = await axios({
+            method: 'GET',
+            url: 'https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world',
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
             },
-            timeout: {
-                request: 15000 // 15 segundos
-            },
-            retry: { 
-                limit: 2,
-                methods: ['GET'],
-                statusCodes: [408, 429, 500, 502, 503, 504]
-            },
-            followRedirect: true,
-            decompress: true,
+            timeout: 15000,
+            maxRedirects: 5,
         });
 
-        debug.statusCode = response.statusCode;
+        debug.statusCode = response.status;
         debug.etapa = 'html_recibido';
 
-        console.log(`✅ HTML recibido (${(response.body.length / 1024).toFixed(1)} KB)`);
+        console.log(`✅ HTML recibido (${(response.data.length / 1024).toFixed(1)} KB)`);
 
-        const $ = cheerio.load(response.body);
+        const $ = cheerio.load(response.data);
         debug.etapa = 'html_parseado';
 
         const partidos = [];
@@ -166,7 +160,7 @@ async function scrapearPartidosEnVivo() {
         
         console.error('❌ Error en scraper:', error.message);
         
-        if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+        if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
             console.error('⚠️ Timeout conectando a ESPN');
         }
         
@@ -193,7 +187,7 @@ async function obtenerPartidosEnVivo() {
     }
 
     // 3. Iniciar nuevo scraping
-    console.log('🔄 Iniciando scraping (Cheerio)...');
+    console.log('🔄 Iniciando scraping (Cheerio + Axios)...');
     scrapingPromise = (async () => {
         const { partidos, debug } = await scrapearPartidosEnVivo();
         
@@ -202,7 +196,7 @@ async function obtenerPartidosEnVivo() {
             data: partidos,
             total: partidos.length,
             timestamp: new Date().toISOString(),
-            source: 'cheerio',
+            source: 'cheerio-axios',
             debug: debug
         };
         
@@ -274,7 +268,7 @@ app.get('/', (req, res) => {
             '/api/status': 'Estado del sistema',
             '/api/health': 'Health check'
         },
-        source: 'cheerio (sin Puppeteer)',
+        source: 'cheerio + axios (sin Puppeteer)',
         timestamp: new Date().toISOString()
     });
 });
@@ -286,12 +280,12 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - SIN PUPPETEER (Cheerio)                ║');
+    console.log('║  🚀 ESPN SCRAPER - SIN PUPPETEER (Cheerio + Axios)        ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
-    console.log('║  🔥 Tecnología:    Cheerio + Got                         ║');
-    console.log('║  💾 Memoria:        ~30MB (vs 200MB de Puppeteer)        ║');
+    console.log('║  🔥 Tecnología:    Cheerio + Axios                       ║');
+    console.log('║  💾 Memoria:        ~30MB                                ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log('║  📌 Endpoints:                                            ║');
     console.log('║   GET /api/live-matches  - Partidos en vivo              ║');
