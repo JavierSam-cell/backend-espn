@@ -4,5 +4,4 @@ node_modules/
 *.log
 *.png
 *.html
-*.json
 .DS_Store
