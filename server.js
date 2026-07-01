@@ -1,10 +1,8 @@
-// server.js - VERSIÓN CON RUTA DE CACHÉ CORRECTA
+// server.js - VERSIÓN CON PUPPETEER COMPLETO (DESCARGA CHROME)
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const path = require('path');
-const os = require('os');
 
 // 🔥 Stealth para evadir detección de ESPN
 puppeteer.use(StealthPlugin());
@@ -27,50 +25,7 @@ let cache = {
 let scrapingPromise = null;
 
 // ============================================================
-// ENCONTRAR CHROME EN RENDER
-// ============================================================
-
-function findChromePath() {
-    // En Render, la caché de Puppeteer está en /opt/render/.cache/puppeteer
-    const homeDir = os.homedir();
-    const possiblePaths = [
-        // Ruta específica de Render
-        '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
-        '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux/chrome',
-        '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
-        // Ruta general con versión
-        '/opt/render/.cache/puppeteer/chrome/linux-126.0.6478.126/chrome-linux64/chrome',
-        '/opt/render/.cache/puppeteer/chrome/linux-126.0.6478.126/chrome-linux/chrome',
-        // Ruta con wildcard (buscamos la versión instalada)
-        '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
-        // Intentar con la ruta de la caché de usuario
-        `${homeDir}/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome`,
-        `${homeDir}/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux/chrome`,
-        // Si no existe, usar el que Puppeteer descargue automáticamente
-        process.env.PUPPETEER_EXECUTABLE_PATH,
-        // Chromium del sistema (si existe)
-        '/usr/bin/chromium-browser',
-        '/usr/bin/google-chrome',
-    ];
-
-    // Log de las rutas que vamos a probar
-    console.log('🔍 Buscando Chrome en:');
-    possiblePaths.forEach(p => {
-        if (p) console.log(`   - ${p}`);
-    });
-
-    // Devolver la primera ruta que exista
-    // Como no podemos verificar existencia en Render fácilmente, devolvemos la más probable
-    // La primera ruta de /opt/render/.cache/puppeteer es la que debería funcionar
-    
-    // En Render, la ruta más común es:
-    const renderPath = '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome';
-    console.log(`✅ Usando ruta de Render: ${renderPath}`);
-    return renderPath;
-}
-
-// ============================================================
-// SCRAPER CON PUPPETEER STEALTH
+// SCRAPER CON PUPPETEER
 // ============================================================
 
 async function scrapearPartidosEnVivo() {
@@ -80,8 +35,7 @@ async function scrapearPartidosEnVivo() {
         error: null,
         totalEnlacesEstado: 0,
         tarjetasDetectadas: false,
-        tiempoTotal: 0,
-        chromePathUsed: null
+        tiempoTotal: 0
     };
 
     let browser = null;
@@ -90,10 +44,7 @@ async function scrapearPartidosEnVivo() {
     try {
         console.log('🌐 Lanzando navegador con Stealth...');
         
-        // Buscar Chrome
-        const chromePath = findChromePath();
-        debug.chromePathUsed = chromePath || 'auto';
-        
+        // 🔥 PUPPETEER COMPLETO - Descarga Chrome automáticamente
         const launchOptions = {
             headless: true,
             args: [
@@ -114,21 +65,13 @@ async function scrapearPartidosEnVivo() {
                 '--disable-ipc-flooding-protection',
                 '--disable-renderer-backgrounding',
                 '--mute-audio',
+                // 🔥 Extra para Render
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
             ],
         };
 
-        // Usar la ruta de Chrome que encontramos
-        if (chromePath) {
-            launchOptions.executablePath = chromePath;
-            console.log(`✅ Usando Chrome en: ${chromePath}`);
-        } else {
-            console.log('🔍 Dejando que Puppeteer encuentre Chrome automáticamente...');
-        }
-
-        // Añadir opciones para evitar detección
-        launchOptions.ignoreDefaultArgs = ['--disable-extensions'];
-        
-        console.log('🚀 Iniciando navegador...');
+        console.log('🚀 Iniciando navegador (puppeteer completo)...');
         browser = await puppeteer.launch(launchOptions);
         console.log('✅ Navegador iniciado');
 
@@ -153,6 +96,9 @@ async function scrapearPartidosEnVivo() {
             console.log('✅ Partidos detectados');
         } catch (error) {
             console.log('⚠️ No se detectaron partidos en 10s:', error.message);
+            // Intentar capturar lo que hay en la página
+            const html = await page.content();
+            console.log('📄 HTML capturado (primeros 500 chars):', html.slice(0, 500));
         }
 
         // Extraer datos
@@ -350,13 +296,13 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - PUPPETEER STEALTH (FINAL)              ║');
+    console.log('║  🚀 ESPN SCRAPER - PUPPETEER (COMPLETO)                   ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
-    console.log('║  🔥 Tecnología:    Puppeteer Stealth                      ║');
+    console.log('║  🔥 Tecnología:    Puppeteer Stealth (completo)          ║');
     console.log('║  🛡️ Anti-detección: Activada                             ║');
-    console.log('║  ⚙️  Chrome:        Buscando en /opt/render/.cache...      ║');
+    console.log('║  ⚙️  Chrome:        Descarga automática                    ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log('║  📌 Endpoints:                                            ║');
     console.log('║   GET /api/live-matches  - Partidos                      ║');
