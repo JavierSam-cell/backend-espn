@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CON @sparticuz/chromium
+// server.js - VERSIÓN CORREGIDA CON @sparticuz/chromium
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer-extra');
@@ -46,9 +46,11 @@ async function scrapearPartidosEnVivo() {
     try {
         console.log('🌐 Lanzando navegador con Stealth y @sparticuz/chromium...');
         
-        // 🔥 Configuración de Chromium
+        // 🔥 Configuración de Chromium - CORREGIDO
         const executablePath = await chromium.executablePath();
-        debug.chromiumVersion = await chromium.version();
+        
+        // 🔥 CORREGIDO: chromium.version es una propiedad, no una función
+        debug.chromiumVersion = chromium.version || 'desconocida';
         
         console.log(`✅ Chromium versión: ${debug.chromiumVersion}`);
         console.log(`✅ Executable path: ${executablePath}`);
@@ -104,7 +106,6 @@ async function scrapearPartidosEnVivo() {
             console.log('✅ Partidos detectados');
         } catch (error) {
             console.log('⚠️ No se detectaron partidos en 10s:', error.message);
-            // Intentar capturar lo que hay en la página
             try {
                 const html = await page.content();
                 console.log('📄 HTML capturado (primeros 800 chars):', html.slice(0, 800));
@@ -118,8 +119,6 @@ async function scrapearPartidosEnVivo() {
         const partidos = await page.evaluate(() => {
             const resultados = [];
             const enlacesEstado = document.querySelectorAll('a[href*="/futbol/partido/"]');
-            
-            console.log(`Encontrados ${enlacesEstado.length} enlaces de partidos`);
             
             enlacesEstado.forEach((enlace) => {
                 const textoEstado = enlace.textContent.trim().toLowerCase();
@@ -308,7 +307,7 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - @sparticuz/chromium                     ║');
+    console.log('║  🚀 ESPN SCRAPER - @sparticuz/chromium (CORREGIDO)        ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
