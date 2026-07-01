@@ -69,7 +69,7 @@ async function scrapearPartidosEnVivo() {
             const textoEstado = $(el).text().trim();
             const textoEstadoLower = textoEstado.toLowerCase();
             
-            // 🔥 ELIMINAMOS EL FILTRO - Mostramos TODOS
+            // 🔥 COMENTADO: Ya no filtramos solo "En Vivo"
             // if (!textoEstadoLower.includes('en vivo')) {
             //     return;
             // }
@@ -118,11 +118,10 @@ async function scrapearPartidosEnVivo() {
                 }
             });
 
-            // Detectar si es "En Vivo", "Resumen" o fecha
+            // Detectar el estado real
             let estado = textoEstado;
             let minuto = textoEstado;
             
-            // Si es "En Vivo", mostrar "En vivo"
             if (textoEstadoLower.includes('en vivo')) {
                 minuto = 'En vivo';
             }
@@ -132,7 +131,7 @@ async function scrapearPartidosEnVivo() {
                 equipoVisitante: equipoVisitante || 'Desconocido',
                 marcadorLocal: marcadorLocal,
                 marcadorVisitante: marcadorVisitante,
-                estado: estado, // 🔥 AGREGAMOS EL ESTADO REAL
+                estado: estado,
                 minuto: minuto,
                 goleadores: goleadores.filter((g, idx, arr) => arr.indexOf(g) === idx),
                 sede: sede,
@@ -154,7 +153,6 @@ async function scrapearPartidosEnVivo() {
 
         console.log(`⚽ Partidos encontrados (TODOS): ${partidosUnicos.length}`);
 
-        // Mostrar ejemplos para depuración
         if (partidosUnicos.length > 0) {
             console.log('📋 Ejemplos de partidos:');
             partidosUnicos.slice(0, 5).forEach((p, idx) => {
