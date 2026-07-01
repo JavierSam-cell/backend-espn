@@ -1,8 +1,9 @@
-// server.js - VERSIÓN CON PUPPETEER COMPLETO (DESCARGA CHROME)
+// server.js - VERSIÓN CON @sparticuz/chromium
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const chromium = require('@sparticuz/chromium');
 
 // 🔥 Stealth para evadir detección de ESPN
 puppeteer.use(StealthPlugin());
@@ -25,7 +26,7 @@ let cache = {
 let scrapingPromise = null;
 
 // ============================================================
-// SCRAPER CON PUPPETEER
+// SCRAPER CON @sparticuz/chromium
 // ============================================================
 
 async function scrapearPartidosEnVivo() {
@@ -35,43 +36,50 @@ async function scrapearPartidosEnVivo() {
         error: null,
         totalEnlacesEstado: 0,
         tarjetasDetectadas: false,
-        tiempoTotal: 0
+        tiempoTotal: 0,
+        chromiumVersion: null
     };
 
     let browser = null;
     let page = null;
 
     try {
-        console.log('🌐 Lanzando navegador con Stealth...');
+        console.log('🌐 Lanzando navegador con Stealth y @sparticuz/chromium...');
         
-        // 🔥 PUPPETEER COMPLETO - Descarga Chrome automáticamente
+        // 🔥 Configuración de Chromium
+        const executablePath = await chromium.executablePath();
+        debug.chromiumVersion = await chromium.version();
+        
+        console.log(`✅ Chromium versión: ${debug.chromiumVersion}`);
+        console.log(`✅ Executable path: ${executablePath}`);
+
         const launchOptions = {
-            headless: true,
             args: [
+                ...chromium.args,
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-extensions',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
                 '--disable-background-networking',
                 '--disable-background-timer-throttling',
                 '--disable-backgrounding-occluded-windows',
                 '--disable-breakpad',
                 '--disable-component-extensions-with-background-pages',
                 '--disable-default-apps',
-                '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+                '--disable-extensions',
                 '--disable-ipc-flooding-protection',
                 '--disable-renderer-backgrounding',
                 '--mute-audio',
-                // 🔥 Extra para Render
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process',
+                '--no-first-run',
+                '--no-zygote',
             ],
+            executablePath: executablePath,
+            headless: chromium.headless,
         };
 
-        console.log('🚀 Iniciando navegador (puppeteer completo)...');
+        console.log('🚀 Iniciando navegador...');
         browser = await puppeteer.launch(launchOptions);
         console.log('✅ Navegador iniciado');
 
@@ -79,7 +87,7 @@ async function scrapearPartidosEnVivo() {
         await page.setViewport({ width: 1366, height: 900 });
         
         // User Agent realista
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
         console.log('🔗 Navegando a ESPN...');
         await page.goto('https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world', {
@@ -97,8 +105,12 @@ async function scrapearPartidosEnVivo() {
         } catch (error) {
             console.log('⚠️ No se detectaron partidos en 10s:', error.message);
             // Intentar capturar lo que hay en la página
-            const html = await page.content();
-            console.log('📄 HTML capturado (primeros 500 chars):', html.slice(0, 500));
+            try {
+                const html = await page.content();
+                console.log('📄 HTML capturado (primeros 800 chars):', html.slice(0, 800));
+            } catch (e) {
+                console.log('⚠️ No se pudo capturar HTML');
+            }
         }
 
         // Extraer datos
@@ -209,7 +221,7 @@ async function obtenerPartidosEnVivo() {
         return scrapingPromise;
     }
 
-    console.log('🔄 Iniciando scraping con Puppeteer Stealth...');
+    console.log('🔄 Iniciando scraping con @sparticuz/chromium...');
     scrapingPromise = (async () => {
         const { partidos, debug } = await scrapearPartidosEnVivo();
         
@@ -218,7 +230,7 @@ async function obtenerPartidosEnVivo() {
             data: partidos,
             total: partidos.length,
             timestamp: new Date().toISOString(),
-            source: 'puppeteer-stealth',
+            source: 'chromium-sparticuz',
             debug: debug
         };
         
@@ -278,13 +290,13 @@ app.get('/', (req, res) => {
     res.json({
         name: 'ESPN Scraper API',
         version: '1.0.0',
-        description: 'Scraper con Puppeteer Stealth',
+        description: 'Scraper con Puppeteer Stealth y @sparticuz/chromium',
         endpoints: {
             '/api/live-matches': 'Obtener partidos',
             '/api/status': 'Estado del sistema',
             '/api/health': 'Health check'
         },
-        source: 'puppeteer-stealth',
+        source: 'chromium-sparticuz',
         timestamp: new Date().toISOString()
     });
 });
@@ -296,13 +308,13 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - PUPPETEER (COMPLETO)                   ║');
+    console.log('║  🚀 ESPN SCRAPER - @sparticuz/chromium                     ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
-    console.log('║  🔥 Tecnología:    Puppeteer Stealth (completo)          ║');
+    console.log('║  🔥 Tecnología:    Puppeteer Stealth + Chromium           ║');
     console.log('║  🛡️ Anti-detección: Activada                             ║');
-    console.log('║  ⚙️  Chrome:        Descarga automática                    ║');
+    console.log('║  ⚙️  Chromium:      @sparticuz/chromium (SIN descarga)    ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log('║  📌 Endpoints:                                            ║');
     console.log('║   GET /api/live-matches  - Partidos                      ║');
