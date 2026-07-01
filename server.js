@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CON puppeteer + @sparticuz/chromium
+// server.js - VERSIÓN CON TIMEOUT MAYOR Y URL ALTERNATIVA
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
@@ -8,10 +8,6 @@ const chromium = require('@sparticuz/chromium');
 
 // 🔥 Configurar puppeteer-extra con el plugin stealth
 puppeteerExtra.use(StealthPlugin());
-
-// 🔥 HACER QUE puppeteer-extra use puppeteer en lugar de puppeteer-core
-// Esto es necesario porque puppeteer-extra busca puppeteer como peer dependency
-// y no encuentra puppeteer-core correctamente
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,7 +27,7 @@ let cache = {
 let scrapingPromise = null;
 
 // ============================================================
-// SCRAPER CON @sparticuz/chromium
+// SCRAPER CON @sparticuz/chromium - VERSIÓN OPTIMIZADA
 // ============================================================
 
 async function scrapearPartidosEnVivo() {
@@ -42,23 +38,29 @@ async function scrapearPartidosEnVivo() {
         totalEnlacesEstado: 0,
         tarjetasDetectadas: false,
         tiempoTotal: 0,
-        chromiumVersion: null
+        chromiumVersion: null,
+        urlUsada: null
     };
 
     let browser = null;
     let page = null;
 
+    // Lista de URLs para probar
+    const urls = [
+        'https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world',
+        'https://www.espn.com.mx/futbol/resultados/_/league/fifa.world',
+        'https://www.espn.com.mx/futbol/resultados/_/competition/fifa-world-cup',
+    ];
+
     try {
         console.log('🌐 Lanzando navegador con Stealth y @sparticuz/chromium...');
         
-        // 🔥 Configuración de Chromium
         const executablePath = await chromium.executablePath();
         debug.chromiumVersion = chromium.version || 'desconocida';
         
         console.log(`✅ Chromium versión: ${debug.chromiumVersion}`);
         console.log(`✅ Executable path: ${executablePath}`);
 
-        // 🔥 Usar puppeteerExtra (que usa puppeteer internamente)
         const launchOptions = {
             args: [
                 ...chromium.args,
@@ -83,6 +85,8 @@ async function scrapearPartidosEnVivo() {
             ],
             executablePath: executablePath,
             headless: chromium.headless,
+            // 🔥 AUMENTAR TIMEOUT
+            timeout: 60000, // 60 segundos
         };
 
         console.log('🚀 Iniciando navegador...');
@@ -95,89 +99,106 @@ async function scrapearPartidosEnVivo() {
         // User Agent realista
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
-        console.log('🔗 Navegando a ESPN...');
-        await page.goto('https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world', {
-            waitUntil: 'networkidle2',
-            timeout: 30000,
-        });
+        // 🔥 Intentar con cada URL
+        let partidos = [];
+        let urlExitosas = [];
 
-        debug.etapa = 'navegacion_completa';
-
-        // Esperar a que carguen los partidos
-        try {
-            await page.waitForSelector('a[href*="/futbol/partido/"]', { timeout: 10000 });
-            debug.tarjetasDetectadas = true;
-            console.log('✅ Partidos detectados');
-        } catch (error) {
-            console.log('⚠️ No se detectaron partidos en 10s:', error.message);
+        for (const url of urls) {
             try {
-                const html = await page.content();
-                console.log('📄 HTML capturado (primeros 800 chars):', html.slice(0, 800));
-            } catch (e) {
-                console.log('⚠️ No se pudo capturar HTML');
+                console.log(`🔗 Probando URL: ${url}`);
+                debug.urlUsada = url;
+                
+                // 🔥 AUMENTAR TIMEOUT DE NAVEGACIÓN
+                await page.goto(url, {
+                    waitUntil: 'domcontentloaded', // Más rápido que networkidle2
+                    timeout: 45000, // 45 segundos
+                });
+
+                console.log('✅ Página cargada');
+                debug.etapa = 'navegacion_completa';
+
+                // Esperar a que carguen los partidos
+                try {
+                    await page.waitForSelector('a[href*="/futbol/partido/"]', { timeout: 15000 });
+                    debug.tarjetasDetectadas = true;
+                    console.log('✅ Partidos detectados');
+                    urlExitosas.push(url);
+                } catch (error) {
+                    console.log(`⚠️ No se detectaron partidos en ${url}:`, error.message);
+                    continue;
+                }
+
+                // Extraer datos
+                console.log('📊 Extrayendo datos...');
+                const partidosTemp = await page.evaluate(() => {
+                    const resultados = [];
+                    const enlacesEstado = document.querySelectorAll('a[href*="/futbol/partido/"]');
+                    
+                    enlacesEstado.forEach((enlace) => {
+                        const textoEstado = enlace.textContent.trim().toLowerCase();
+                        
+                        let tarjeta = enlace.closest('div, li, article');
+                        if (!tarjeta) return;
+                        
+                        const equipos = tarjeta.querySelectorAll('a[href*="/futbol/equipo/"]');
+                        if (equipos.length < 2) return;
+                        
+                        const textoTarjeta = tarjeta.textContent.replace(/\s+/g, ' ');
+                        const marcadorMatch = textoTarjeta.match(/(\d+)\s*[-–—]\s*(\d+)/);
+                        
+                        const goleadores = [];
+                        tarjeta.querySelectorAll('a[href*="/futbol/jugador/"]').forEach((j) => {
+                            const contenedor = j.closest('li, p, div');
+                            const texto = contenedor ? contenedor.textContent.trim() : j.textContent.trim();
+                            if (texto.length > 0 && texto.length < 150) {
+                                goleadores.push(texto);
+                            }
+                        });
+                        
+                        let sede = null;
+                        tarjeta.querySelectorAll('div, span').forEach((el) => {
+                            const texto = el.textContent.trim();
+                            if (texto.length > 0 && texto.length < 80 && /,/.test(texto) && !/\d/.test(texto)) {
+                                sede = texto;
+                            }
+                        });
+                        
+                        resultados.push({
+                            equipoLocal: equipos[0]?.textContent.trim() || 'Desconocido',
+                            equipoVisitante: equipos[1]?.textContent.trim() || 'Desconocido',
+                            marcadorLocal: marcadorMatch ? marcadorMatch[1] : '0',
+                            marcadorVisitante: marcadorMatch ? marcadorMatch[2] : '0',
+                            estado: enlace.textContent.trim() || 'Desconocido',
+                            minuto: textoEstado.includes('en vivo') ? 'En vivo' : enlace.textContent.trim(),
+                            goleadores: [...new Set(goleadores)],
+                            sede: sede,
+                        });
+                    });
+                    
+                    return resultados;
+                });
+
+                if (partidosTemp.length > 0) {
+                    partidos = partidosTemp;
+                    console.log(`✅ Encontrados ${partidos.length} partidos en ${url}`);
+                    break; // Si encontramos partidos, salir del loop
+                }
+
+            } catch (error) {
+                console.log(`❌ Error con URL ${url}:`, error.message);
+                continue;
             }
         }
 
-        // Extraer datos
-        console.log('📊 Extrayendo datos...');
-        const partidos = await page.evaluate(() => {
-            const resultados = [];
-            const enlacesEstado = document.querySelectorAll('a[href*="/futbol/partido/"]');
-            
-            enlacesEstado.forEach((enlace) => {
-                const textoEstado = enlace.textContent.trim().toLowerCase();
-                
-                // Buscar la tarjeta del partido
-                let tarjeta = enlace.closest('div, li, article');
-                if (!tarjeta) return;
-                
-                // Buscar equipos
-                const equipos = tarjeta.querySelectorAll('a[href*="/futbol/equipo/"]');
-                if (equipos.length < 2) return;
-                
-                // Extraer marcadores
-                const textoTarjeta = tarjeta.textContent.replace(/\s+/g, ' ');
-                const marcadorMatch = textoTarjeta.match(/(\d+)\s*[-–—]\s*(\d+)/);
-                
-                // Extraer goleadores
-                const goleadores = [];
-                tarjeta.querySelectorAll('a[href*="/futbol/jugador/"]').forEach((j) => {
-                    const contenedor = j.closest('li, p, div');
-                    const texto = contenedor ? contenedor.textContent.trim() : j.textContent.trim();
-                    if (texto.length > 0 && texto.length < 150) {
-                        goleadores.push(texto);
-                    }
-                });
-                
-                // Extraer sede
-                let sede = null;
-                tarjeta.querySelectorAll('div, span').forEach((el) => {
-                    const texto = el.textContent.trim();
-                    if (texto.length > 0 && texto.length < 80 && /,/.test(texto) && !/\d/.test(texto)) {
-                        sede = texto;
-                    }
-                });
-                
-                resultados.push({
-                    equipoLocal: equipos[0]?.textContent.trim() || 'Desconocido',
-                    equipoVisitante: equipos[1]?.textContent.trim() || 'Desconocido',
-                    marcadorLocal: marcadorMatch ? marcadorMatch[1] : '0',
-                    marcadorVisitante: marcadorMatch ? marcadorMatch[2] : '0',
-                    estado: enlace.textContent.trim() || 'Desconocido',
-                    minuto: textoEstado.includes('en vivo') ? 'En vivo' : enlace.textContent.trim(),
-                    goleadores: [...new Set(goleadores)],
-                    sede: sede,
-                });
-            });
-            
-            return resultados;
-        });
+        if (partidos.length === 0) {
+            console.log('⚠️ No se encontraron partidos en ninguna URL');
+        }
 
         debug.etapa = 'completado';
         debug.tiempoTotal = Date.now() - inicio;
         debug.totalEnlacesEstado = partidos.length;
-
-        console.log(`⚽ Partidos encontrados: ${partidos.length}`);
+        debug.urlsProbadas = urls;
+        debug.urlExitosa = urlExitosas[0] || null;
 
         // Deduplicar
         const vistos = new Set();
@@ -311,12 +332,13 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - puppeteer + @sparticuz/chromium        ║');
+    console.log('║  🚀 ESPN SCRAPER - OPTIMIZADO (3 URLs)                   ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
     console.log('║  🔥 Tecnología:    puppeteer + @sparticuz/chromium        ║');
     console.log('║  🛡️ Anti-detección: Activada                             ║');
+    console.log('║  ⏱️  Timeout:       45 segundos por URL                   ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log('║  📌 Endpoints:                                            ║');
     console.log('║   GET /api/live-matches  - Partidos                      ║');
