@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CON SELECTORES MEJORADOS
+// server.js - VERSIÓN FINAL CON STEALTH MEJORADO
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
@@ -6,6 +6,7 @@ const puppeteerExtra = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const chromium = require('@sparticuz/chromium');
 
+// 🔥 Configuración más agresiva de Stealth
 puppeteerExtra.use(StealthPlugin());
 
 const app = express();
@@ -25,28 +26,59 @@ async function scrapearPartidosEnVivo() {
         error: null,
         totalEnlacesEstado: 0,
         tarjetasDetectadas: false,
-        tiempoTotal: 0,
-        selectoresEncontrados: {},
-        partidosRaw: []
+        tiempoTotal: 0
     };
 
     let browser = null;
     let page = null;
 
-    const urls = [
-        'https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world',
-    ];
-
     try {
-        console.log('🌐 Lanzando navegador...');
+        console.log('🌐 Lanzando navegador con Stealth avanzado...');
         
         const executablePath = await chromium.executablePath();
         console.log(`✅ Executable path: ${executablePath}`);
 
         const launchOptions = {
-            args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+            args: [
+                ...chromium.args,
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-background-networking',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-breakpad',
+                '--disable-component-extensions-with-background-pages',
+                '--disable-default-apps',
+                '--disable-extensions',
+                '--disable-ipc-flooding-protection',
+                '--disable-renderer-backgrounding',
+                '--mute-audio',
+                '--no-first-run',
+                '--no-zygote',
+                // 🔥 Extra para evadir detección
+                '--disable-features=ChromeWhatsNewUI',
+                '--disable-features=HttpsOnlyMode',
+                '--disable-domain-reliability',
+                '--disable-client-side-phishing-detection',
+                '--disable-component-update',
+                '--disable-default-apps',
+                '--disable-hang-monitor',
+                '--disable-prompt-on-repost',
+                '--disable-sync',
+                '--disable-translate',
+                '--disable-windows10-custom-titlebar',
+                '--metrics-recording-only',
+                '--no-default-browser-check',
+            ],
             executablePath: executablePath,
             headless: chromium.headless,
+            // 🔥 Ignorar errores de certificados
+            ignoreHTTPSErrors: true,
         };
 
         console.log('🚀 Iniciando navegador...');
@@ -54,165 +86,140 @@ async function scrapearPartidosEnVivo() {
         console.log('✅ Navegador iniciado');
 
         page = await browser.newPage();
-        await page.setViewport({ width: 1366, height: 900 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        
+        // 🔥 Configuración avanzada de la página
+        await page.setViewport({ 
+            width: 1366, 
+            height: 900,
+            deviceScaleFactor: 1,
+            hasTouch: false,
+            isLandscape: true,
+            isMobile: false,
+        });
+        
+        // 🔥 User Agent muy realista
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+        
+        // 🔥 Configurar idioma y zona horaria
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0',
+        });
 
-        for (const url of urls) {
-            try {
-                console.log(`🔗 Probando URL: ${url}`);
-                
-                await page.goto(url, {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 30000,
-                });
+        // 🔥 Ocultar webdriver
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['es-MX', 'es', 'en'] });
+            // @ts-ignore
+            window.chrome = { runtime: {} };
+        });
 
-                console.log('✅ Página cargada');
+        const url = 'https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world';
+        console.log(`🔗 Navegando a ${url}...`);
+        
+        // 🔥 Intentar con networkidle2 primero
+        try {
+            await page.goto(url, {
+                waitUntil: 'networkidle2',
+                timeout: 45000,
+            });
+        } catch (error) {
+            console.log('⚠️ networkidle2 falló, intentando con domcontentloaded...');
+            await page.goto(url, {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000,
+            });
+        }
 
-                // Esperar a que cargue el contenido
-                await page.waitForSelector('body', { timeout: 5000 });
+        console.log('✅ Página cargada');
 
-                // 🔍 BUSCAR TODOS LOS POSIBLES SELECTORES
-                const resultados = await page.evaluate(() => {
-                    const resultados = {
-                        enlacesPartido: [],
-                        enlacesEquipo: [],
-                        tarjetas: [],
-                        posiblesPartidos: [],
-                        htmlSample: ''
-                    };
+        // 🔥 Esperar un poco para que cargue el contenido dinámico
+        await page.waitForTimeout(3000);
 
-                    // 1. Buscar TODOS los enlaces que contengan "partido" o "juego"
-                    const enlaces = document.querySelectorAll('a');
-                    enlaces.forEach(a => {
-                        const href = a.getAttribute('href') || '';
-                        const texto = a.textContent.trim();
-                        if (href.includes('partido') || href.includes('juego') || href.includes('match')) {
-                            resultados.enlacesPartido.push({ href, texto, html: a.outerHTML.slice(0, 200) });
-                        }
-                        if (href.includes('equipo')) {
-                            resultados.enlacesEquipo.push({ href, texto });
-                        }
-                    });
+        // 🔥 Hacer scroll para cargar contenido lazy
+        await page.evaluate(() => {
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+        await page.waitForTimeout(2000);
 
-                    // 2. Buscar tarjetas con clases comunes
-                    const selectores = [
-                        'div[class*="score"]',
-                        'div[class*="match"]',
-                        'div[class*="game"]',
-                        'div[class*="event"]',
-                        'li[class*="score"]',
-                        'li[class*="match"]',
-                        'div[class*="card"]',
-                        'article'
-                    ];
-                    
-                    selectores.forEach(sel => {
-                        document.querySelectorAll(sel).forEach(el => {
-                            const texto = el.textContent.trim().slice(0, 100);
-                            if (texto.length > 20) {
-                                resultados.tarjetas.push({
-                                    selector: sel,
-                                    texto: texto,
-                                    clases: el.className || 'sin-clase',
-                                    html: el.outerHTML.slice(0, 300)
-                                });
-                            }
-                        });
-                    });
+        // 🔥 Intentar con múltiples selectores
+        const resultados = await page.evaluate(() => {
+            const data = {
+                partidos: [],
+                enlacesEncontrados: [],
+                htmlSample: ''
+            };
 
-                    // 3. Buscar partidos por estructura típica
-                    const contenedores = document.querySelectorAll('div, li, article');
-                    contenedores.forEach(el => {
-                        const texto = el.textContent.trim();
-                        // Buscar patrones de marcador como "2 - 1" o "2-1"
-                        if (texto.match(/\d+\s*[-–—]\s*\d+/)) {
-                            const equipos = el.querySelectorAll('a[href*="equipo"]');
-                            if (equipos.length >= 2) {
-                                resultados.posiblesPartidos.push({
-                                    texto: texto.slice(0, 200),
-                                    equipos: Array.from(equipos).map(e => e.textContent.trim()),
-                                    html: el.outerHTML.slice(0, 400)
-                                });
-                            }
-                        }
-                    });
-
-                    // 4. Sample del HTML
-                    resultados.htmlSample = document.body.innerHTML.slice(0, 2000);
-                    
-                    return resultados;
-                });
-
-                debug.selectoresEncontrados = resultados;
-                debug.partidosRaw = resultados.posiblesPartidos;
-
-                console.log(`🔍 Enlaces de partido: ${resultados.enlacesPartido.length}`);
-                console.log(`🔍 Enlaces de equipo: ${resultados.enlacesEquipo.length}`);
-                console.log(`🔍 Tarjetas encontradas: ${resultados.tarjetas.length}`);
-                console.log(`🔍 Posibles partidos: ${resultados.posiblesPartidos.length}`);
-
-                // Mostrar primeros resultados
-                if (resultados.enlacesPartido.length > 0) {
-                    console.log('📋 Ejemplos de enlaces de partido:');
-                    resultados.enlacesPartido.slice(0, 5).forEach((e, i) => {
-                        console.log(`  ${i+1}. href: ${e.href}`);
-                        console.log(`     texto: "${e.texto}"`);
-                    });
+            // Buscar TODOS los enlaces
+            const enlaces = document.querySelectorAll('a');
+            enlaces.forEach(a => {
+                const href = a.getAttribute('href') || '';
+                const texto = a.textContent.trim();
+                if (href.includes('partido') || href.includes('juego') || href.includes('match')) {
+                    data.enlacesEncontrados.push({ href, texto });
                 }
+            });
 
-                if (resultados.posiblesPartidos.length > 0) {
-                    console.log('📋 Posibles partidos encontrados:');
-                    resultados.posiblesPartidos.slice(0, 5).forEach((p, i) => {
-                        console.log(`  ${i+1}. ${p.equipos.join(' vs ')}`);
-                        console.log(`     texto: ${p.texto.slice(0, 100)}`);
-                    });
-                }
-
-                // Si encontramos partidos, intentar extraerlos
-                if (resultados.posiblesPartidos.length > 0) {
-                    const partidos = resultados.posiblesPartidos.map(p => {
-                        const marcadorMatch = p.texto.match(/(\d+)\s*[-–—]\s*(\d+)/);
-                        return {
-                            equipoLocal: p.equipos[0] || 'Desconocido',
-                            equipoVisitante: p.equipos[1] || 'Desconocido',
+            // Buscar partidos por estructura
+            const contenedores = document.querySelectorAll('div, li, article');
+            contenedores.forEach(el => {
+                const texto = el.textContent.trim();
+                // Buscar patrón de marcador
+                if (texto.match(/\d+\s*[-–—]\s*\d+/)) {
+                    const equipos = el.querySelectorAll('a[href*="equipo"]');
+                    if (equipos.length >= 2) {
+                        const marcadorMatch = texto.match(/(\d+)\s*[-–—]\s*(\d+)/);
+                        data.partidos.push({
+                            equipoLocal: equipos[0].textContent.trim(),
+                            equipoVisitante: equipos[1].textContent.trim(),
                             marcadorLocal: marcadorMatch ? marcadorMatch[1] : '0',
                             marcadorVisitante: marcadorMatch ? marcadorMatch[2] : '0',
                             estado: 'Desconocido',
                             minuto: 'Desconocido',
                             goleadores: [],
                             sede: null,
-                        };
-                    });
-
-                    // Deduplicar
-                    const vistos = new Set();
-                    const partidosUnicos = partidos.filter((p) => {
-                        const clave = `${p.equipoLocal}-${p.equipoVisitante}`.toLowerCase().trim();
-                        if (vistos.has(clave)) return false;
-                        vistos.add(clave);
-                        return true;
-                    });
-
-                    debug.etapa = 'completado';
-                    debug.tiempoTotal = Date.now() - inicio;
-                    debug.totalEnlacesEstado = partidosUnicos.length;
-
-                    console.log(`✅ Partidos encontrados: ${partidosUnicos.length}`);
-                    
-                    if (partidosUnicos.length > 0) {
-                        return { partidos: partidosUnicos, debug };
+                        });
                     }
                 }
+            });
 
-            } catch (error) {
-                console.log(`❌ Error con URL ${url}:`, error.message);
-            }
+            data.htmlSample = document.body.innerHTML.slice(0, 1000);
+            return data;
+        });
+
+        debug.enlacesEncontrados = resultados.enlacesEncontrados;
+        debug.htmlSample = resultados.htmlSample;
+
+        console.log(`🔍 Enlaces encontrados: ${resultados.enlacesEncontrados.length}`);
+        console.log(`🔍 Partidos encontrados: ${resultados.partidos.length}`);
+
+        if (resultados.enlacesEncontrados.length > 0) {
+            console.log('📋 Ejemplos de enlaces:');
+            resultados.enlacesEncontrados.slice(0, 5).forEach((e, i) => {
+                console.log(`  ${i+1}. ${e.texto} -> ${e.href}`);
+            });
         }
 
-        debug.etapa = 'completado_sin_partidos';
+        // Deduplicar partidos
+        const vistos = new Set();
+        const partidosUnicos = resultados.partidos.filter((p) => {
+            const clave = `${p.equipoLocal}-${p.equipoVisitante}`.toLowerCase().trim();
+            if (vistos.has(clave)) return false;
+            vistos.add(clave);
+            return true;
+        });
+
+        debug.etapa = 'completado';
         debug.tiempoTotal = Date.now() - inicio;
-        console.log('⚠️ No se encontraron partidos');
-        return { partidos: [], debug };
+        debug.totalEnlacesEstado = partidosUnicos.length;
+
+        console.log(`✅ Partidos únicos: ${partidosUnicos.length}`);
+        return { partidos: partidosUnicos, debug };
 
     } catch (error) {
         debug.etapa = 'error';
@@ -246,7 +253,7 @@ async function obtenerPartidosEnVivo() {
             data: partidos,
             total: partidos.length,
             timestamp: new Date().toISOString(),
-            source: 'chromium-sparticuz',
+            source: 'chromium-sparticuz-stealth',
             debug: debug
         };
         cache = { payload, ts: Date.now() };
@@ -292,6 +299,7 @@ app.get('/', (req, res) => {
     res.json({
         name: 'ESPN Scraper API',
         version: '1.0.0',
+        description: 'Scraper con Puppeteer Stealth avanzado',
         endpoints: {
             '/api/live-matches': 'Obtener partidos',
             '/api/status': 'Estado del sistema',
