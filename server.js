@@ -1,4 +1,4 @@
-// server.js - VERSIÓN DE PRUEBA: MUESTRA TODOS LOS PARTIDOS
+// server.js - VERSIÓN DE DIAGNÓSTICO: Inspecciona la estructura de ESPN
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -22,21 +22,20 @@ let cache = {
 let scrapingPromise = null;
 
 // ============================================================
-// SCRAPER CON CHEERIO - TODOS LOS PARTIDOS (MODO PRUEBA)
+// SCRAPER DE DIAGNÓSTICO - MUESTRA TODOS LOS ENLACES
 // ============================================================
 
-async function scrapearPartidosEnVivo() {
-    const inicio = Date.now();
+async function diagnosticarEstructura() {
     const debug = {
         etapa: 'inicio',
         error: null,
-        totalEnlacesEstado: 0,
-        tarjetasDetectadas: false,
-        statusCode: 0
+        statusCode: 0,
+        enlacesEncontrados: [],
+        posiblesSelectores: {}
     };
 
     try {
-        console.log('🌐 Conectando a ESPN...');
+        console.log('🔍 [DIAGNÓSTICO] Conectando a ESPN...');
         
         const response = await axios({
             method: 'GET',
@@ -53,239 +52,140 @@ async function scrapearPartidosEnVivo() {
         debug.statusCode = response.status;
         debug.etapa = 'html_recibido';
 
-        console.log(`✅ HTML recibido (${(response.data.length / 1024).toFixed(1)} KB)`);
+        console.log(`✅ Status: ${response.status} - HTML: ${(response.data.length / 1024).toFixed(1)} KB`);
 
         const $ = cheerio.load(response.data);
-        debug.etapa = 'html_parseado';
-
-        const partidos = [];
-        const enlacesEstado = $('a[href*="/futbol/partido/_/juegoId/"]');
-        debug.totalEnlacesEstado = enlacesEstado.length;
-
-        console.log(`🔍 Enlaces de partidos encontrados: ${enlacesEstado.length}`);
-
-        // 🔥 PROCESA TODOS LOS PARTIDOS (sin filtrar)
-        enlacesEstado.each((i, el) => {
-            const textoEstado = $(el).text().trim();
-            const textoEstadoLower = textoEstado.toLowerCase();
-            
-            // 🔥 COMENTADO: Ya no filtramos solo "En Vivo"
-            // if (!textoEstadoLower.includes('en vivo')) {
-            //     return;
-            // }
-
-            debug.tarjetasDetectadas = true;
-
-            // Buscar tarjeta del partido
-            let tarjeta = $(el).closest('div, li, article');
-            
-            // Buscar equipos
-            let equipos = tarjeta.find('a[href*="/futbol/equipo/"]');
-            
-            if (equipos.length < 2) {
-                tarjeta = tarjeta.parent();
-                equipos = tarjeta.find('a[href*="/futbol/equipo/"]');
-                if (equipos.length < 2) return;
+        
+        // 🔍 1. Buscar TODOS los enlaces que contengan "partido" o "juego"
+        const todosLosEnlaces = [];
+        $('a').each((i, el) => {
+            const href = $(el).attr('href');
+            const texto = $(el).text().trim();
+            if (href && (href.includes('partido') || href.includes('juego') || href.includes('match'))) {
+                todosLosEnlaces.push({ href, texto, html: $(el).html()?.slice(0, 100) });
             }
-
-            // Extraer datos
-            const equipoLocal = $(equipos[0]).text().trim();
-            const equipoVisitante = $(equipos[1]).text().trim();
-            
-            // Extraer marcadores
-            const textoTarjeta = tarjeta.text().replace(/\s+/g, ' ');
-            const marcadorMatch = textoTarjeta.match(/(\d+)\s*[-–—]\s*(\d+)/);
-            const marcadorLocal = marcadorMatch ? marcadorMatch[1] : '0';
-            const marcadorVisitante = marcadorMatch ? marcadorMatch[2] : '0';
-            
-            // Extraer goleadores
-            const goleadores = [];
-            tarjeta.find('a[href*="/futbol/jugador/"]').each((j, jugador) => {
-                const contenedor = $(jugador).closest('li, p, div');
-                const texto = contenedor.length ? contenedor.text().trim() : $(jugador).text().trim();
-                if (texto.length > 0 && texto.length < 150) {
-                    goleadores.push(texto);
-                }
-            });
-            
-            // Extraer sede
-            let sede = null;
-            tarjeta.find('div, span').each((j, el) => {
-                const texto = $(el).text().trim();
-                if (texto.length > 0 && texto.length < 80 && /,/.test(texto) && !/\d/.test(texto)) {
-                    sede = texto;
-                    return false;
-                }
-            });
-
-            // Detectar el estado real
-            let estado = textoEstado;
-            let minuto = textoEstado;
-            
-            if (textoEstadoLower.includes('en vivo')) {
-                minuto = 'En vivo';
-            }
-
-            partidos.push({
-                equipoLocal: equipoLocal || 'Desconocido',
-                equipoVisitante: equipoVisitante || 'Desconocido',
-                marcadorLocal: marcadorLocal,
-                marcadorVisitante: marcadorVisitante,
-                estado: estado,
-                minuto: minuto,
-                goleadores: goleadores.filter((g, idx, arr) => arr.indexOf(g) === idx),
-                sede: sede,
-            });
         });
 
-        debug.etapa = 'completado';
-        debug.tiempoTotal = Date.now() - inicio;
-        debug.partidosEncontrados = partidos.length;
+        debug.enlacesEncontrados = todosLosEnlaces.slice(0, 20); // Guardar los primeros 20
 
-        // Deduplicar
-        const vistos = new Set();
-        const partidosUnicos = partidos.filter((p) => {
-            const clave = `${p.equipoLocal}-${p.equipoVisitante}`.toLowerCase().trim();
-            if (vistos.has(clave)) return false;
-            vistos.add(clave);
-            return true;
+        console.log(`🔍 Enlaces con "partido"/"juego"/"match": ${todosLosEnlaces.length}`);
+
+        // Mostrar los primeros 5 enlaces
+        console.log('📋 Ejemplos de enlaces encontrados:');
+        todosLosEnlaces.slice(0, 5).forEach((e, i) => {
+            console.log(`   ${i + 1}. href: ${e.href}`);
+            console.log(`      texto: "${e.texto}"`);
+            console.log(`      html: ${e.html}`);
+            console.log('');
         });
 
-        console.log(`⚽ Partidos encontrados (TODOS): ${partidosUnicos.length}`);
+        // 🔍 2. Buscar todas las tarjetas de partido (divs con clases comunes)
+        const posiblesTarjetas = [];
+        $('div[class*="score"], div[class*="match"], div[class*="game"], div[class*="event"], li[class*="score"], li[class*="match"]').each((i, el) => {
+            const clases = $(el).attr('class') || '';
+            const texto = $(el).text().trim().slice(0, 100);
+            posiblesTarjetas.push({ clases, texto, html: $(el).html()?.slice(0, 150) });
+        });
 
-        if (partidosUnicos.length > 0) {
-            console.log('📋 Ejemplos de partidos:');
-            partidosUnicos.slice(0, 5).forEach((p, idx) => {
-                console.log(`   ${idx + 1}. ${p.equipoLocal} vs ${p.equipoVisitante} - ${p.estado} (${p.marcadorLocal}-${p.marcadorVisitante})`);
+        debug.posiblesSelectores.tarjetasEncontradas = posiblesTarjetas.length;
+        console.log(`🔍 Tarjetas con clases comunes: ${posiblesTarjetas.length}`);
+
+        if (posiblesTarjetas.length > 0) {
+            console.log('📋 Ejemplos de tarjetas:');
+            posiblesTarjetas.slice(0, 3).forEach((t, i) => {
+                console.log(`   ${i + 1}. clases: ${t.clases}`);
+                console.log(`      texto: "${t.texto}"`);
+                console.log('');
             });
-        } else {
-            console.log('⚠️ No se encontraron partidos.');
-            const sample = $('a[href*="/futbol/equipo/"]').slice(0, 3);
-            const equiposEjemplo = sample.map((i, el) => $(el).text().trim()).get().join(', ');
-            console.log(`🔍 Equipos encontrados: ${equiposEjemplo || 'ninguno'}`);
-            
-            const estados = enlacesEstado.slice(0, 5).map((i, el) => $(el).text().trim()).get();
-            console.log(`🔍 Estados: ${estados.join(', ')}`);
         }
 
-        return { partidos: partidosUnicos, debug };
+        // 🔍 3. Buscar específicamente los equipos (enlaces a /futbol/equipo/)
+        const enlacesEquipos = [];
+        $('a[href*="/futbol/equipo/"]').each((i, el) => {
+            const href = $(el).attr('href');
+            const texto = $(el).text().trim();
+            const padre = $(el).closest('div, li, article');
+            const padreClases = padre.attr('class') || '';
+            enlacesEquipos.push({ href, texto, padreClases, padreTexto: padre.text().trim().slice(0, 100) });
+        });
+
+        debug.posiblesSelectores.equiposEncontrados = enlacesEquipos.length;
+        console.log(`🔍 Enlaces a equipos: ${enlacesEquipos.length}`);
+
+        if (enlacesEquipos.length > 0) {
+            console.log('📋 Ejemplos de equipos:');
+            enlacesEquipos.slice(0, 5).forEach((e, i) => {
+                console.log(`   ${i + 1}. ${e.texto} -> ${e.href}`);
+                console.log(`      padre: ${e.padreClases}`);
+                console.log(`      contexto: "${e.padreTexto}"`);
+                console.log('');
+            });
+        }
+
+        debug.etapa = 'diagnostico_completado';
+
+        return { debug };
 
     } catch (error) {
         debug.etapa = 'error';
         debug.error = error.message;
-        debug.tiempoTotal = Date.now() - inicio;
-        
-        console.error('❌ Error en scraper:', error.message);
-        
-        if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
-            console.error('⚠️ Timeout conectando a ESPN');
-        }
-        
-        return { partidos: [], debug };
+        console.error('❌ Error en diagnóstico:', error.message);
+        return { debug };
     }
 }
 
 // ============================================================
-// FUNCIÓN PARA OBTENER PARTIDOS (CON CACHÉ)
+// ENDPOINT DE DIAGNÓSTICO
 // ============================================================
 
-async function obtenerPartidosEnVivo() {
-    // 1. Si hay caché fresca, usarla
-    if (cache.payload && (Date.now() - cache.ts) < CACHE_TTL_MS) {
-        const edad = Math.floor((Date.now() - cache.ts) / 1000);
-        console.log(`📦 Caché fresca (${edad}s de antigüedad)`);
-        return cache.payload;
-    }
-
-    // 2. Si ya hay un scraping en curso, esperar
-    if (scrapingPromise) {
-        console.log('⏳ Scraping en curso, esperando...');
-        return scrapingPromise;
-    }
-
-    // 3. Iniciar nuevo scraping
-    console.log('🔄 Iniciando scraping (Cheerio + Axios - TODOS los partidos)...');
-    scrapingPromise = (async () => {
-        const { partidos, debug } = await scrapearPartidosEnVivo();
-        
-        const payload = {
+app.get('/api/diagnostico', async (req, res) => {
+    try {
+        console.log('🔍 [DIAGNÓSTICO] Iniciando...');
+        const { debug } = await diagnosticarEstructura();
+        res.json({
             success: true,
-            data: partidos,
-            total: partidos.length,
-            timestamp: new Date().toISOString(),
-            source: 'cheerio-axios-todos',
-            debug: debug
-        };
-        
-        cache = { payload, ts: Date.now() };
-        console.log(`✅ Scraping completado: ${partidos.length} partidos en ${debug.tiempoTotal}ms`);
-        return payload;
-    })();
-
-    try {
-        return await scrapingPromise;
-    } finally {
-        scrapingPromise = null;
-    }
-}
-
-// ============================================================
-// ENDPOINTS DE LA API
-// ============================================================
-
-// Health check
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        uptime: Math.floor(process.uptime())
-    });
-});
-
-// Partidos - AHORA MUESTRA TODOS
-app.get('/api/live-matches', async (req, res) => {
-    try {
-        console.log('📡 [REQUEST] /api/live-matches');
-        const payload = await obtenerPartidosEnVivo();
-        res.json(payload);
-    } catch (error) {
-        console.error('❌ Error:', error.message);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message,
+            mensaje: 'Diagnóstico completado - Revisa los logs de Render para ver los detalles',
+            debug: debug,
             timestamp: new Date().toISOString()
         });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Estado del sistema
-app.get('/api/status', (req, res) => {
-    const cacheAge = cache.ts ? Math.floor((Date.now() - cache.ts) / 1000) : null;
+// ============================================================
+// ENDPOINTS NORMALES (por si acaso)
+// ============================================================
+
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/live-matches', (req, res) => {
     res.json({
-        status: 'ok',
-        uptime: Math.floor(process.uptime()),
-        cache: {
-            tieneDatos: !!cache.payload,
-            antiguedad: cacheAge !== null ? cacheAge + 's' : 'sin datos',
-            totalPartidos: cache.payload?.data?.length || 0,
-            source: cache.payload?.source || 'ninguno'
-        },
+        success: true,
+        mensaje: 'Usa /api/diagnostico para inspeccionar la estructura de ESPN',
         timestamp: new Date().toISOString()
     });
 });
 
-// Raíz
+app.get('/api/status', (req, res) => {
+    res.json({
+        status: 'ok',
+        uptime: Math.floor(process.uptime()),
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.get('/', (req, res) => {
     res.json({
-        name: 'ESPN Scraper API',
+        name: 'ESPN Scraper API - DIAGNÓSTICO',
         version: '1.0.0',
-        description: 'Scraper de partidos - MODO PRUEBA (TODOS los partidos)',
         endpoints: {
-            '/api/live-matches': 'Obtener TODOS los partidos',
-            '/api/status': 'Estado del sistema',
-            '/api/health': 'Health check'
+            '/api/diagnostico': 'Inspecciona la estructura de ESPN y muestra enlaces encontrados',
+            '/api/health': 'Health check',
+            '/api/status': 'Estado del sistema'
         },
-        source: 'cheerio + axios (sin Puppeteer)',
         timestamp: new Date().toISOString()
     });
 });
@@ -297,17 +197,16 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - MODO PRUEBA (TODOS LOS PARTIDOS)       ║');
+    console.log('║  🔍 ESPN SCRAPER - MODO DIAGNÓSTICO                       ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
-    console.log('║  🔥 Tecnología:    Cheerio + Axios                       ║');
-    console.log('║  📋 Modo:          MOSTRANDO TODOS LOS PARTIDOS          ║');
+    console.log('║  📋 Usa /api/diagnostico para inspeccionar la estructura  ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log('║  📌 Endpoints:                                            ║');
-    console.log('║   GET /api/live-matches  - TODOS los partidos            ║');
-    console.log('║   GET /api/status        - Estado del sistema            ║');
-    console.log('║   GET /api/health        - Health check                  ║');
+    console.log('║   GET /api/diagnostico  - Inspecciona ESPN                ║');
+    console.log('║   GET /api/health       - Health check                    ║');
+    console.log('║   GET /api/status       - Estado del sistema              ║');
     console.log('╚════════════════════════════════════════════════════════════╝');
     console.log('');
     console.log('✅ Servidor listo!');
