@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CON AXIOS (más estable que got)
+// server.js - VERSIÓN DE PRUEBA: MUESTRA TODOS LOS PARTIDOS
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -22,7 +22,7 @@ let cache = {
 let scrapingPromise = null;
 
 // ============================================================
-// SCRAPER CON CHEERIO (SIN PUPPETEER)
+// SCRAPER CON CHEERIO - TODOS LOS PARTIDOS (MODO PRUEBA)
 // ============================================================
 
 async function scrapearPartidosEnVivo() {
@@ -62,15 +62,17 @@ async function scrapearPartidosEnVivo() {
         const enlacesEstado = $('a[href*="/futbol/partido/_/juegoId/"]');
         debug.totalEnlacesEstado = enlacesEstado.length;
 
-        console.log(`🔍 Enlaces de partidos: ${enlacesEstado.length}`);
+        console.log(`🔍 Enlaces de partidos encontrados: ${enlacesEstado.length}`);
 
+        // 🔥 PROCESA TODOS LOS PARTIDOS (sin filtrar)
         enlacesEstado.each((i, el) => {
-            const textoEstado = $(el).text().trim().toLowerCase();
+            const textoEstado = $(el).text().trim();
+            const textoEstadoLower = textoEstado.toLowerCase();
             
-            // Solo partidos EN VIVO
-            if (!textoEstado.includes('en vivo')) {
-                return;
-            }
+            // 🔥 ELIMINAMOS EL FILTRO - Mostramos TODOS
+            // if (!textoEstadoLower.includes('en vivo')) {
+            //     return;
+            // }
 
             debug.tarjetasDetectadas = true;
 
@@ -116,12 +118,22 @@ async function scrapearPartidosEnVivo() {
                 }
             });
 
+            // Detectar si es "En Vivo", "Resumen" o fecha
+            let estado = textoEstado;
+            let minuto = textoEstado;
+            
+            // Si es "En Vivo", mostrar "En vivo"
+            if (textoEstadoLower.includes('en vivo')) {
+                minuto = 'En vivo';
+            }
+
             partidos.push({
                 equipoLocal: equipoLocal || 'Desconocido',
                 equipoVisitante: equipoVisitante || 'Desconocido',
                 marcadorLocal: marcadorLocal,
                 marcadorVisitante: marcadorVisitante,
-                minuto: 'En vivo',
+                estado: estado, // 🔥 AGREGAMOS EL ESTADO REAL
+                minuto: minuto,
                 goleadores: goleadores.filter((g, idx, arr) => arr.indexOf(g) === idx),
                 sede: sede,
             });
@@ -140,15 +152,22 @@ async function scrapearPartidosEnVivo() {
             return true;
         });
 
-        console.log(`⚽ Partidos en vivo: ${partidosUnicos.length}`);
+        console.log(`⚽ Partidos encontrados (TODOS): ${partidosUnicos.length}`);
 
-        if (partidosUnicos.length === 0) {
+        // Mostrar ejemplos para depuración
+        if (partidosUnicos.length > 0) {
+            console.log('📋 Ejemplos de partidos:');
+            partidosUnicos.slice(0, 5).forEach((p, idx) => {
+                console.log(`   ${idx + 1}. ${p.equipoLocal} vs ${p.equipoVisitante} - ${p.estado} (${p.marcadorLocal}-${p.marcadorVisitante})`);
+            });
+        } else {
+            console.log('⚠️ No se encontraron partidos.');
             const sample = $('a[href*="/futbol/equipo/"]').slice(0, 3);
             const equiposEjemplo = sample.map((i, el) => $(el).text().trim()).get().join(', ');
-            console.log(`🔍 Ejemplos de equipos: ${equiposEjemplo || 'ninguno'}`);
+            console.log(`🔍 Equipos encontrados: ${equiposEjemplo || 'ninguno'}`);
             
             const estados = enlacesEstado.slice(0, 5).map((i, el) => $(el).text().trim()).get();
-            console.log(`🔍 Estados de partidos: ${estados.join(', ')}`);
+            console.log(`🔍 Estados: ${estados.join(', ')}`);
         }
 
         return { partidos: partidosUnicos, debug };
@@ -187,7 +206,7 @@ async function obtenerPartidosEnVivo() {
     }
 
     // 3. Iniciar nuevo scraping
-    console.log('🔄 Iniciando scraping (Cheerio + Axios)...');
+    console.log('🔄 Iniciando scraping (Cheerio + Axios - TODOS los partidos)...');
     scrapingPromise = (async () => {
         const { partidos, debug } = await scrapearPartidosEnVivo();
         
@@ -196,7 +215,7 @@ async function obtenerPartidosEnVivo() {
             data: partidos,
             total: partidos.length,
             timestamp: new Date().toISOString(),
-            source: 'cheerio-axios',
+            source: 'cheerio-axios-todos',
             debug: debug
         };
         
@@ -225,7 +244,7 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Partidos en vivo
+// Partidos - AHORA MUESTRA TODOS
 app.get('/api/live-matches', async (req, res) => {
     try {
         console.log('📡 [REQUEST] /api/live-matches');
@@ -262,9 +281,9 @@ app.get('/', (req, res) => {
     res.json({
         name: 'ESPN Scraper API',
         version: '1.0.0',
-        description: 'Scraper de partidos en vivo del Mundial 2026',
+        description: 'Scraper de partidos - MODO PRUEBA (TODOS los partidos)',
         endpoints: {
-            '/api/live-matches': 'Obtener partidos en vivo',
+            '/api/live-matches': 'Obtener TODOS los partidos',
             '/api/status': 'Estado del sistema',
             '/api/health': 'Health check'
         },
@@ -280,15 +299,15 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - SIN PUPPETEER (Cheerio + Axios)        ║');
+    console.log('║  🚀 ESPN SCRAPER - MODO PRUEBA (TODOS LOS PARTIDOS)       ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
     console.log('║  🔥 Tecnología:    Cheerio + Axios                       ║');
-    console.log('║  💾 Memoria:        ~30MB                                ║');
+    console.log('║  📋 Modo:          MOSTRANDO TODOS LOS PARTIDOS          ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log('║  📌 Endpoints:                                            ║');
-    console.log('║   GET /api/live-matches  - Partidos en vivo              ║');
+    console.log('║   GET /api/live-matches  - TODOS los partidos            ║');
     console.log('║   GET /api/status        - Estado del sistema            ║');
     console.log('║   GET /api/health        - Health check                  ║');
     console.log('╚════════════════════════════════════════════════════════════╝');
