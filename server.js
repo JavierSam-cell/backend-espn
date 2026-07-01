@@ -1,10 +1,10 @@
-// server.js - VERSIÓN CON PUPPETEER STEALTH (FUNCIONAL)
+// server.js - VERSIÓN CON PUPPETEER STEALTH Y RUTA DE CHROME
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// 🔥 IMPORTANTE: Stealth para evadir detección de ESPN
+// 🔥 Stealth para evadir detección de ESPN
 puppeteer.use(StealthPlugin());
 
 const app = express();
@@ -23,6 +23,32 @@ let cache = {
     ts: 0 
 };
 let scrapingPromise = null;
+
+// ============================================================
+// ENCONTRAR CHROME EN RENDER
+// ============================================================
+
+function getChromePath() {
+    // Posibles rutas de Chrome en Render
+    const paths = [
+        process.env.PUPPETEER_EXECUTABLE_PATH,
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
+        '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux/chrome',
+    ];
+    
+    for (const path of paths) {
+        if (path) {
+            console.log(`🔍 Intentando usar Chrome en: ${path}`);
+            return path;
+        }
+    }
+    
+    // Si no encuentra, usar el que Puppeteer descargue automáticamente
+    console.log('⚠️ No se encontró Chrome en rutas conocidas, usando el predeterminado');
+    return undefined;
+}
 
 // ============================================================
 // SCRAPER CON PUPPETEER STEALTH
@@ -44,7 +70,10 @@ async function scrapearPartidosEnVivo() {
     try {
         console.log('🌐 Lanzando navegador con Stealth...');
         
-        browser = await puppeteer.launch({
+        const chromePath = getChromePath();
+        
+        // Configuración de Puppeteer
+        const launchOptions = {
             headless: true,
             args: [
                 '--no-sandbox',
@@ -65,7 +94,15 @@ async function scrapearPartidosEnVivo() {
                 '--disable-renderer-backgrounding',
                 '--mute-audio',
             ],
-        });
+        };
+
+        // Si tenemos una ruta específica, usarla
+        if (chromePath) {
+            launchOptions.executablePath = chromePath;
+            console.log(`✅ Usando Chrome en: ${chromePath}`);
+        }
+
+        browser = await puppeteer.launch(launchOptions);
 
         page = await browser.newPage();
         await page.setViewport({ width: 1366, height: 900 });
