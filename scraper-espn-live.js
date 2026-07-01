@@ -42,6 +42,31 @@ function log(emoji, msg) {
 
 // ------------------------------ NAVEGADOR ---------------------------------
 
+// --- Navegador persistente ---
+// En vez de lanzar (y cerrar) un Chromium nuevo en cada scraping, mantenemos
+// UNA instancia viva entre llamadas. Esto ahorra la memoria y el tiempo del
+// arranque (~1-2s + overhead de RAM cada vez). Si el browser se cae o se
+// desconecta, se detecta y se relanza automáticamente en la siguiente llamada.
+let navegadorCompartido = null;
+
+async function obtenerNavegador() {
+    if (navegadorCompartido && navegadorCompartido.isConnected()) {
+        return navegadorCompartido;
+    }
+    if (navegadorCompartido) {
+        // Estaba asignado pero ya no conectado (crash/kill) -> limpiar referencia
+        try { await navegadorCompartido.close(); } catch {}
+    }
+    navegadorCompartido = await lanzarNavegador();
+    // Si Chromium crashea solo (p. ej. OOM), limpiamos la referencia para
+    // que la siguiente llamada relance uno nuevo en vez de reusar uno muerto.
+    navegadorCompartido.on('disconnected', () => {
+        log('⚠️', 'El navegador compartido se desconectó (posible crash/OOM).');
+        navegadorCompartido = null;
+    });
+    return navegadorCompartido;
+}
+
 async function lanzarNavegador() {
     return puppeteer.launch({
         headless: CONFIG.headless,
@@ -49,12 +74,26 @@ async function lanzarNavegador() {
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-blink-features=AutomationControlled',
-            '--disable-dev-shm-usage',
+            '--disable-dev-shm-usage', // usa /tmp en vez de /dev/shm (poco espacio en contenedores)
             '--disable-gpu',
             '--no-first-run',
             '--no-zygote',
-            '--single-process',
-            '--disable-extensions'
+            '--disable-extensions',
+            // 🔻 Flags extra para reducir memoria en contenedores pequeños (Render free = 512MB)
+            '--disable-software-rasterizer',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-breakpad',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-default-apps',
+            '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+            '--disable-ipc-flooding-protection',
+            '--disable-renderer-backgrounding',
+            '--mute-audio',
+            // ❌ Quitado: '--single-process'. En contenedores con poca RAM es MENOS
+            // estable que el modo multi-proceso normal (fuerza browser+renderer a
+            // compartir un solo proceso, lo que puede disparar picos de memoria).
         ],
     });
 }
@@ -290,11 +329,12 @@ async function scrapearPartidosEnVivo() {
         htmlSnippet: null,
     };
 
+    let page;
     try {
-        log('🌐', 'Iniciando navegador...');
-        browser = await lanzarNavegador();
+        log('🌐', 'Obteniendo navegador...');
+        browser = await obtenerNavegador();
         debug.etapa = 'navegador_lanzado';
-        const page = await prepararPagina(browser);
+        page = await prepararPagina(browser);
 
         await navegarConReintentos(page, CONFIG.url);
         debug.etapa = 'navegacion_completa';
@@ -318,17 +358,22 @@ async function scrapearPartidosEnVivo() {
             } catch {}
         }
 
-        // 🔥 MODIFICACIÓN: En Render, NO guardamos archivos (no hay persistencia)
-        // Solo logueamos para debugging
-        try {
-            const screenshotPath = path.join(CONFIG.outputDir, 'espn-screen.png');
-            const htmlPath = path.join(CONFIG.outputDir, 'espn-full.html');
-            await page.screenshot({ path: screenshotPath, fullPage: true });
-            fs.writeFileSync(htmlPath, await page.content());
-            log('📸', `Screenshot guardado en ${screenshotPath}`);
-            log('📄', `HTML guardado en ${htmlPath}`);
-        } catch (e) {
-            log('⚠️', 'No se pudieron guardar archivos de debug (normal en Render)');
+        // 🔥 Screenshot + HTML completo SOLO si se activa explícitamente con
+        // DEBUG_ARTIFACTS=true. En producción esto es peso muerto: consume RAM
+        // extra para renderizar el screenshot full-page y escribe a un disco
+        // efímero (Render free) que no sirve para nada persistente. Se deja
+        // disponible para depuración manual, pero apagado por defecto.
+        if (process.env.DEBUG_ARTIFACTS === 'true') {
+            try {
+                const screenshotPath = path.join(CONFIG.outputDir, 'espn-screen.png');
+                const htmlPath = path.join(CONFIG.outputDir, 'espn-full.html');
+                await page.screenshot({ path: screenshotPath, fullPage: true });
+                fs.writeFileSync(htmlPath, await page.content());
+                log('📸', `Screenshot guardado en ${screenshotPath}`);
+                log('📄', `HTML guardado en ${htmlPath}`);
+            } catch (e) {
+                log('⚠️', 'No se pudieron guardar archivos de debug (normal en Render)');
+            }
         }
 
         const { resultados: partidosEnVivo, debugEstados, debugTarjetas } = await page.evaluate(
@@ -361,10 +406,14 @@ async function scrapearPartidosEnVivo() {
         debug.error = error.message;
         return { partidos: [], debug };
     } finally {
-        if (browser) {
-            await browser.close();
-            log('🔄', 'Navegador cerrado.');
+        // Solo cerramos la PÁGINA, no el navegador: se mantiene vivo entre
+        // llamadas para no pagar el costo de relanzar Chromium cada vez.
+        if (page) {
+            try {
+                await page.close();
+            } catch {}
         }
+        log('🔄', 'Página cerrada (navegador se mantiene activo).');
     }
 }
 
