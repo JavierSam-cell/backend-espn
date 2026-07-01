@@ -1,12 +1,17 @@
-// server.js - VERSIÓN CORREGIDA CON @sparticuz/chromium
+// server.js - VERSIÓN CON puppeteer + @sparticuz/chromium
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer-extra');
+const puppeteer = require('puppeteer');
+const puppeteerExtra = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const chromium = require('@sparticuz/chromium');
 
-// 🔥 Stealth para evadir detección de ESPN
-puppeteer.use(StealthPlugin());
+// 🔥 Configurar puppeteer-extra con el plugin stealth
+puppeteerExtra.use(StealthPlugin());
+
+// 🔥 HACER QUE puppeteer-extra use puppeteer en lugar de puppeteer-core
+// Esto es necesario porque puppeteer-extra busca puppeteer como peer dependency
+// y no encuentra puppeteer-core correctamente
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,15 +51,14 @@ async function scrapearPartidosEnVivo() {
     try {
         console.log('🌐 Lanzando navegador con Stealth y @sparticuz/chromium...');
         
-        // 🔥 Configuración de Chromium - CORREGIDO
+        // 🔥 Configuración de Chromium
         const executablePath = await chromium.executablePath();
-        
-        // 🔥 CORREGIDO: chromium.version es una propiedad, no una función
         debug.chromiumVersion = chromium.version || 'desconocida';
         
         console.log(`✅ Chromium versión: ${debug.chromiumVersion}`);
         console.log(`✅ Executable path: ${executablePath}`);
 
+        // 🔥 Usar puppeteerExtra (que usa puppeteer internamente)
         const launchOptions = {
             args: [
                 ...chromium.args,
@@ -82,7 +86,7 @@ async function scrapearPartidosEnVivo() {
         };
 
         console.log('🚀 Iniciando navegador...');
-        browser = await puppeteer.launch(launchOptions);
+        browser = await puppeteerExtra.launch(launchOptions);
         console.log('✅ Navegador iniciado');
 
         page = await browser.newPage();
@@ -307,13 +311,12 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - @sparticuz/chromium (CORREGIDO)        ║');
+    console.log('║  🚀 ESPN SCRAPER - puppeteer + @sparticuz/chromium        ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log(`║  📡 Puerto:         ${PORT}`);
     console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
-    console.log('║  🔥 Tecnología:    Puppeteer Stealth + Chromium           ║');
+    console.log('║  🔥 Tecnología:    puppeteer + @sparticuz/chromium        ║');
     console.log('║  🛡️ Anti-detección: Activada                             ║');
-    console.log('║  ⚙️  Chromium:      @sparticuz/chromium (SIN descarga)    ║');
     console.log('╠════════════════════════════════════════════════════════════╣');
     console.log('║  📌 Endpoints:                                            ║');
     console.log('║   GET /api/live-matches  - Partidos                      ║');
