@@ -26,11 +26,23 @@ let fetchingPromise = null;
 // Liga por defecto: Copa Mundial FIFA. Se puede cambiar vía ?liga=
 const LIGA_DEFAULT = 'fifa.world';
 
-// Convierte Date -> 'YYYYMMDD' en zona horaria local del server.
+// Convierte Date -> 'YYYYMMDD' usando la zona horaria de México,
+// sin importar en qué zona horaria corra el servidor (Render usa UTC).
+// Esto evita que entre medianoche y las 6am hora de México el
+// servidor calcule "mañana" en vez de "hoy".
+const ZONA_HORARIA = 'America/Mexico_City';
+
 function formatFecha(date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
+    const partes = new Intl.DateTimeFormat('en-CA', {
+        timeZone: ZONA_HORARIA,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(date);
+
+    const y = partes.find((p) => p.type === 'year').value;
+    const m = partes.find((p) => p.type === 'month').value;
+    const d = partes.find((p) => p.type === 'day').value;
     return `${y}${m}${d}`;
 }
 
