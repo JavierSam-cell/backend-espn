@@ -1,4 +1,4 @@
-// server.js - VERSIÓN FINAL CON STEALTH MEJORADO
+// server.js - VERSIÓN CORREGIDA (sin waitForTimeout)
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
@@ -18,6 +18,9 @@ app.use(express.json());
 const CACHE_TTL_MS = 30000;
 let cache = { payload: null, ts: 0 };
 let scrapingPromise = null;
+
+// 🔥 Función sleep para evitar page.waitForTimeout
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function scrapearPartidosEnVivo() {
     const inicio = Date.now();
@@ -60,7 +63,6 @@ async function scrapearPartidosEnVivo() {
                 '--mute-audio',
                 '--no-first-run',
                 '--no-zygote',
-                // 🔥 Extra para evadir detección
                 '--disable-features=ChromeWhatsNewUI',
                 '--disable-features=HttpsOnlyMode',
                 '--disable-domain-reliability',
@@ -77,7 +79,6 @@ async function scrapearPartidosEnVivo() {
             ],
             executablePath: executablePath,
             headless: chromium.headless,
-            // 🔥 Ignorar errores de certificados
             ignoreHTTPSErrors: true,
         };
 
@@ -87,7 +88,6 @@ async function scrapearPartidosEnVivo() {
 
         page = await browser.newPage();
         
-        // 🔥 Configuración avanzada de la página
         await page.setViewport({ 
             width: 1366, 
             height: 900,
@@ -97,10 +97,8 @@ async function scrapearPartidosEnVivo() {
             isMobile: false,
         });
         
-        // 🔥 User Agent muy realista
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
         
-        // 🔥 Configurar idioma y zona horaria
         await page.setExtraHTTPHeaders({
             'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -110,7 +108,6 @@ async function scrapearPartidosEnVivo() {
             'Cache-Control': 'max-age=0',
         });
 
-        // 🔥 Ocultar webdriver
         await page.evaluateOnNewDocument(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
@@ -138,14 +135,14 @@ async function scrapearPartidosEnVivo() {
 
         console.log('✅ Página cargada');
 
-        // 🔥 Esperar un poco para que cargue el contenido dinámico
-        await page.waitForTimeout(3000);
+        // 🔥 Esperar con sleep en lugar de waitForTimeout
+        await sleep(3000);
 
         // 🔥 Hacer scroll para cargar contenido lazy
         await page.evaluate(() => {
             window.scrollTo(0, document.body.scrollHeight);
         });
-        await page.waitForTimeout(2000);
+        await sleep(2000);
 
         // 🔥 Intentar con múltiples selectores
         const resultados = await page.evaluate(() => {
@@ -169,7 +166,6 @@ async function scrapearPartidosEnVivo() {
             const contenedores = document.querySelectorAll('div, li, article');
             contenedores.forEach(el => {
                 const texto = el.textContent.trim();
-                // Buscar patrón de marcador
                 if (texto.match(/\d+\s*[-–—]\s*\d+/)) {
                     const equipos = el.querySelectorAll('a[href*="equipo"]');
                     if (equipos.length >= 2) {
