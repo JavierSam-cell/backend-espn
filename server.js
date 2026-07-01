@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CON TIMEOUT MAYOR Y URL ALTERNATIVA
+// server.js - VERSIÓN CON SELECTORES MEJORADOS
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
@@ -6,7 +6,6 @@ const puppeteerExtra = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const chromium = require('@sparticuz/chromium');
 
-// 🔥 Configurar puppeteer-extra con el plugin stealth
 puppeteerExtra.use(StealthPlugin());
 
 const app = express();
@@ -15,20 +14,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// ============================================================
-// CONFIGURACIÓN DE CACHÉ
-// ============================================================
-
-const CACHE_TTL_MS = 30000; // 30 segundos
-let cache = { 
-    payload: null, 
-    ts: 0 
-};
+const CACHE_TTL_MS = 30000;
+let cache = { payload: null, ts: 0 };
 let scrapingPromise = null;
-
-// ============================================================
-// SCRAPER CON @sparticuz/chromium - VERSIÓN OPTIMIZADA
-// ============================================================
 
 async function scrapearPartidosEnVivo() {
     const inicio = Date.now();
@@ -38,55 +26,27 @@ async function scrapearPartidosEnVivo() {
         totalEnlacesEstado: 0,
         tarjetasDetectadas: false,
         tiempoTotal: 0,
-        chromiumVersion: null,
-        urlUsada: null
+        selectoresEncontrados: {},
+        partidosRaw: []
     };
 
     let browser = null;
     let page = null;
 
-    // Lista de URLs para probar
     const urls = [
         'https://www.espn.com.mx/futbol/resultados/_/liga/fifa.world',
-        'https://www.espn.com.mx/futbol/resultados/_/league/fifa.world',
-        'https://www.espn.com.mx/futbol/resultados/_/competition/fifa-world-cup',
     ];
 
     try {
-        console.log('🌐 Lanzando navegador con Stealth y @sparticuz/chromium...');
+        console.log('🌐 Lanzando navegador...');
         
         const executablePath = await chromium.executablePath();
-        debug.chromiumVersion = chromium.version || 'desconocida';
-        
-        console.log(`✅ Chromium versión: ${debug.chromiumVersion}`);
         console.log(`✅ Executable path: ${executablePath}`);
 
         const launchOptions = {
-            args: [
-                ...chromium.args,
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process',
-                '--disable-background-networking',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-breakpad',
-                '--disable-component-extensions-with-background-pages',
-                '--disable-default-apps',
-                '--disable-extensions',
-                '--disable-ipc-flooding-protection',
-                '--disable-renderer-backgrounding',
-                '--mute-audio',
-                '--no-first-run',
-                '--no-zygote',
-            ],
+            args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
             executablePath: executablePath,
             headless: chromium.headless,
-            // 🔥 AUMENTAR TIMEOUT
-            timeout: 60000, // 60 segundos
         };
 
         console.log('🚀 Iniciando navegador...');
@@ -95,132 +55,170 @@ async function scrapearPartidosEnVivo() {
 
         page = await browser.newPage();
         await page.setViewport({ width: 1366, height: 900 });
-        
-        // User Agent realista
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
-
-        // 🔥 Intentar con cada URL
-        let partidos = [];
-        let urlExitosas = [];
 
         for (const url of urls) {
             try {
                 console.log(`🔗 Probando URL: ${url}`);
-                debug.urlUsada = url;
                 
-                // 🔥 AUMENTAR TIMEOUT DE NAVEGACIÓN
                 await page.goto(url, {
-                    waitUntil: 'domcontentloaded', // Más rápido que networkidle2
-                    timeout: 45000, // 45 segundos
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000,
                 });
 
                 console.log('✅ Página cargada');
-                debug.etapa = 'navegacion_completa';
 
-                // Esperar a que carguen los partidos
-                try {
-                    await page.waitForSelector('a[href*="/futbol/partido/"]', { timeout: 15000 });
-                    debug.tarjetasDetectadas = true;
-                    console.log('✅ Partidos detectados');
-                    urlExitosas.push(url);
-                } catch (error) {
-                    console.log(`⚠️ No se detectaron partidos en ${url}:`, error.message);
-                    continue;
-                }
+                // Esperar a que cargue el contenido
+                await page.waitForSelector('body', { timeout: 5000 });
 
-                // Extraer datos
-                console.log('📊 Extrayendo datos...');
-                const partidosTemp = await page.evaluate(() => {
-                    const resultados = [];
-                    const enlacesEstado = document.querySelectorAll('a[href*="/futbol/partido/"]');
+                // 🔍 BUSCAR TODOS LOS POSIBLES SELECTORES
+                const resultados = await page.evaluate(() => {
+                    const resultados = {
+                        enlacesPartido: [],
+                        enlacesEquipo: [],
+                        tarjetas: [],
+                        posiblesPartidos: [],
+                        htmlSample: ''
+                    };
+
+                    // 1. Buscar TODOS los enlaces que contengan "partido" o "juego"
+                    const enlaces = document.querySelectorAll('a');
+                    enlaces.forEach(a => {
+                        const href = a.getAttribute('href') || '';
+                        const texto = a.textContent.trim();
+                        if (href.includes('partido') || href.includes('juego') || href.includes('match')) {
+                            resultados.enlacesPartido.push({ href, texto, html: a.outerHTML.slice(0, 200) });
+                        }
+                        if (href.includes('equipo')) {
+                            resultados.enlacesEquipo.push({ href, texto });
+                        }
+                    });
+
+                    // 2. Buscar tarjetas con clases comunes
+                    const selectores = [
+                        'div[class*="score"]',
+                        'div[class*="match"]',
+                        'div[class*="game"]',
+                        'div[class*="event"]',
+                        'li[class*="score"]',
+                        'li[class*="match"]',
+                        'div[class*="card"]',
+                        'article'
+                    ];
                     
-                    enlacesEstado.forEach((enlace) => {
-                        const textoEstado = enlace.textContent.trim().toLowerCase();
-                        
-                        let tarjeta = enlace.closest('div, li, article');
-                        if (!tarjeta) return;
-                        
-                        const equipos = tarjeta.querySelectorAll('a[href*="/futbol/equipo/"]');
-                        if (equipos.length < 2) return;
-                        
-                        const textoTarjeta = tarjeta.textContent.replace(/\s+/g, ' ');
-                        const marcadorMatch = textoTarjeta.match(/(\d+)\s*[-–—]\s*(\d+)/);
-                        
-                        const goleadores = [];
-                        tarjeta.querySelectorAll('a[href*="/futbol/jugador/"]').forEach((j) => {
-                            const contenedor = j.closest('li, p, div');
-                            const texto = contenedor ? contenedor.textContent.trim() : j.textContent.trim();
-                            if (texto.length > 0 && texto.length < 150) {
-                                goleadores.push(texto);
+                    selectores.forEach(sel => {
+                        document.querySelectorAll(sel).forEach(el => {
+                            const texto = el.textContent.trim().slice(0, 100);
+                            if (texto.length > 20) {
+                                resultados.tarjetas.push({
+                                    selector: sel,
+                                    texto: texto,
+                                    clases: el.className || 'sin-clase',
+                                    html: el.outerHTML.slice(0, 300)
+                                });
                             }
-                        });
-                        
-                        let sede = null;
-                        tarjeta.querySelectorAll('div, span').forEach((el) => {
-                            const texto = el.textContent.trim();
-                            if (texto.length > 0 && texto.length < 80 && /,/.test(texto) && !/\d/.test(texto)) {
-                                sede = texto;
-                            }
-                        });
-                        
-                        resultados.push({
-                            equipoLocal: equipos[0]?.textContent.trim() || 'Desconocido',
-                            equipoVisitante: equipos[1]?.textContent.trim() || 'Desconocido',
-                            marcadorLocal: marcadorMatch ? marcadorMatch[1] : '0',
-                            marcadorVisitante: marcadorMatch ? marcadorMatch[2] : '0',
-                            estado: enlace.textContent.trim() || 'Desconocido',
-                            minuto: textoEstado.includes('en vivo') ? 'En vivo' : enlace.textContent.trim(),
-                            goleadores: [...new Set(goleadores)],
-                            sede: sede,
                         });
                     });
+
+                    // 3. Buscar partidos por estructura típica
+                    const contenedores = document.querySelectorAll('div, li, article');
+                    contenedores.forEach(el => {
+                        const texto = el.textContent.trim();
+                        // Buscar patrones de marcador como "2 - 1" o "2-1"
+                        if (texto.match(/\d+\s*[-–—]\s*\d+/)) {
+                            const equipos = el.querySelectorAll('a[href*="equipo"]');
+                            if (equipos.length >= 2) {
+                                resultados.posiblesPartidos.push({
+                                    texto: texto.slice(0, 200),
+                                    equipos: Array.from(equipos).map(e => e.textContent.trim()),
+                                    html: el.outerHTML.slice(0, 400)
+                                });
+                            }
+                        }
+                    });
+
+                    // 4. Sample del HTML
+                    resultados.htmlSample = document.body.innerHTML.slice(0, 2000);
                     
                     return resultados;
                 });
 
-                if (partidosTemp.length > 0) {
-                    partidos = partidosTemp;
-                    console.log(`✅ Encontrados ${partidos.length} partidos en ${url}`);
-                    break; // Si encontramos partidos, salir del loop
+                debug.selectoresEncontrados = resultados;
+                debug.partidosRaw = resultados.posiblesPartidos;
+
+                console.log(`🔍 Enlaces de partido: ${resultados.enlacesPartido.length}`);
+                console.log(`🔍 Enlaces de equipo: ${resultados.enlacesEquipo.length}`);
+                console.log(`🔍 Tarjetas encontradas: ${resultados.tarjetas.length}`);
+                console.log(`🔍 Posibles partidos: ${resultados.posiblesPartidos.length}`);
+
+                // Mostrar primeros resultados
+                if (resultados.enlacesPartido.length > 0) {
+                    console.log('📋 Ejemplos de enlaces de partido:');
+                    resultados.enlacesPartido.slice(0, 5).forEach((e, i) => {
+                        console.log(`  ${i+1}. href: ${e.href}`);
+                        console.log(`     texto: "${e.texto}"`);
+                    });
+                }
+
+                if (resultados.posiblesPartidos.length > 0) {
+                    console.log('📋 Posibles partidos encontrados:');
+                    resultados.posiblesPartidos.slice(0, 5).forEach((p, i) => {
+                        console.log(`  ${i+1}. ${p.equipos.join(' vs ')}`);
+                        console.log(`     texto: ${p.texto.slice(0, 100)}`);
+                    });
+                }
+
+                // Si encontramos partidos, intentar extraerlos
+                if (resultados.posiblesPartidos.length > 0) {
+                    const partidos = resultados.posiblesPartidos.map(p => {
+                        const marcadorMatch = p.texto.match(/(\d+)\s*[-–—]\s*(\d+)/);
+                        return {
+                            equipoLocal: p.equipos[0] || 'Desconocido',
+                            equipoVisitante: p.equipos[1] || 'Desconocido',
+                            marcadorLocal: marcadorMatch ? marcadorMatch[1] : '0',
+                            marcadorVisitante: marcadorMatch ? marcadorMatch[2] : '0',
+                            estado: 'Desconocido',
+                            minuto: 'Desconocido',
+                            goleadores: [],
+                            sede: null,
+                        };
+                    });
+
+                    // Deduplicar
+                    const vistos = new Set();
+                    const partidosUnicos = partidos.filter((p) => {
+                        const clave = `${p.equipoLocal}-${p.equipoVisitante}`.toLowerCase().trim();
+                        if (vistos.has(clave)) return false;
+                        vistos.add(clave);
+                        return true;
+                    });
+
+                    debug.etapa = 'completado';
+                    debug.tiempoTotal = Date.now() - inicio;
+                    debug.totalEnlacesEstado = partidosUnicos.length;
+
+                    console.log(`✅ Partidos encontrados: ${partidosUnicos.length}`);
+                    
+                    if (partidosUnicos.length > 0) {
+                        return { partidos: partidosUnicos, debug };
+                    }
                 }
 
             } catch (error) {
                 console.log(`❌ Error con URL ${url}:`, error.message);
-                continue;
             }
         }
 
-        if (partidos.length === 0) {
-            console.log('⚠️ No se encontraron partidos en ninguna URL');
-        }
-
-        debug.etapa = 'completado';
+        debug.etapa = 'completado_sin_partidos';
         debug.tiempoTotal = Date.now() - inicio;
-        debug.totalEnlacesEstado = partidos.length;
-        debug.urlsProbadas = urls;
-        debug.urlExitosa = urlExitosas[0] || null;
-
-        // Deduplicar
-        const vistos = new Set();
-        const partidosUnicos = partidos.filter((p) => {
-            const clave = `${p.equipoLocal}-${p.equipoVisitante}`.toLowerCase().trim();
-            if (vistos.has(clave)) return false;
-            vistos.add(clave);
-            return true;
-        });
-
-        console.log(`✅ Partidos únicos: ${partidosUnicos.length}`);
-        return { partidos: partidosUnicos, debug };
+        console.log('⚠️ No se encontraron partidos');
+        return { partidos: [], debug };
 
     } catch (error) {
         debug.etapa = 'error';
         debug.error = error.message;
         debug.tiempoTotal = Date.now() - inicio;
-        
         console.error('❌ Error en scraper:', error.message);
-        if (error.stack) {
-            console.error('Stack trace:', error.stack);
-        }
         return { partidos: [], debug };
     } finally {
         if (page) await page.close().catch(() => {});
@@ -229,14 +227,9 @@ async function scrapearPartidosEnVivo() {
     }
 }
 
-// ============================================================
-// FUNCIÓN PARA OBTENER PARTIDOS (CON CACHÉ)
-// ============================================================
-
 async function obtenerPartidosEnVivo() {
     if (cache.payload && (Date.now() - cache.ts) < CACHE_TTL_MS) {
-        const edad = Math.floor((Date.now() - cache.ts) / 1000);
-        console.log(`📦 Caché fresca (${edad}s)`);
+        console.log(`📦 Caché fresca`);
         return cache.payload;
     }
 
@@ -245,10 +238,9 @@ async function obtenerPartidosEnVivo() {
         return scrapingPromise;
     }
 
-    console.log('🔄 Iniciando scraping con @sparticuz/chromium...');
+    console.log('🔄 Iniciando scraping...');
     scrapingPromise = (async () => {
         const { partidos, debug } = await scrapearPartidosEnVivo();
-        
         const payload = {
             success: true,
             data: partidos,
@@ -257,7 +249,6 @@ async function obtenerPartidosEnVivo() {
             source: 'chromium-sparticuz',
             debug: debug
         };
-        
         cache = { payload, ts: Date.now() };
         console.log(`✅ Completado: ${partidos.length} partidos`);
         return payload;
@@ -270,16 +261,8 @@ async function obtenerPartidosEnVivo() {
     }
 }
 
-// ============================================================
-// ENDPOINTS
-// ============================================================
-
 app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        uptime: Math.floor(process.uptime())
-    });
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 app.get('/api/live-matches', async (req, res) => {
@@ -287,11 +270,7 @@ app.get('/api/live-matches', async (req, res) => {
         const payload = await obtenerPartidosEnVivo();
         res.json(payload);
     } catch (error) {
-        res.status(500).json({ 
-            success: false, 
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -303,8 +282,7 @@ app.get('/api/status', (req, res) => {
         cache: {
             tieneDatos: !!cache.payload,
             antiguedad: cacheAge !== null ? cacheAge + 's' : 'sin datos',
-            totalPartidos: cache.payload?.data?.length || 0,
-            source: cache.payload?.source || 'ninguno'
+            totalPartidos: cache.payload?.data?.length || 0
         },
         timestamp: new Date().toISOString()
     });
@@ -314,38 +292,16 @@ app.get('/', (req, res) => {
     res.json({
         name: 'ESPN Scraper API',
         version: '1.0.0',
-        description: 'Scraper con Puppeteer Stealth y @sparticuz/chromium',
         endpoints: {
             '/api/live-matches': 'Obtener partidos',
             '/api/status': 'Estado del sistema',
             '/api/health': 'Health check'
-        },
-        source: 'chromium-sparticuz',
-        timestamp: new Date().toISOString()
+        }
     });
 });
 
-// ============================================================
-// INICIAR SERVIDOR
-// ============================================================
-
 app.listen(PORT, () => {
-    console.log('');
-    console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║  🚀 ESPN SCRAPER - OPTIMIZADO (3 URLs)                   ║');
-    console.log('╠════════════════════════════════════════════════════════════╣');
-    console.log(`║  📡 Puerto:         ${PORT}`);
-    console.log(`║  ⏰ Inicio:         ${new Date().toISOString()}`);
-    console.log('║  🔥 Tecnología:    puppeteer + @sparticuz/chromium        ║');
-    console.log('║  🛡️ Anti-detección: Activada                             ║');
-    console.log('║  ⏱️  Timeout:       45 segundos por URL                   ║');
-    console.log('╠════════════════════════════════════════════════════════════╣');
-    console.log('║  📌 Endpoints:                                            ║');
-    console.log('║   GET /api/live-matches  - Partidos                      ║');
-    console.log('║   GET /api/status        - Estado del sistema            ║');
-    console.log('║   GET /api/health        - Health check                  ║');
-    console.log('╚════════════════════════════════════════════════════════════╝');
-    console.log('');
+    console.log(`🚀 Servidor en puerto ${PORT}`);
+    console.log(`⏰ ${new Date().toISOString()}`);
     console.log('✅ Servidor listo!');
-    console.log('');
 });
