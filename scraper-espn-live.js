@@ -127,8 +127,14 @@ async function navegarConReintentos(page, url) {
     for (let intento = 1; intento <= CONFIG.maxRetries; intento++) {
         try {
             log('🔗', `Navegando a ${url} (intento ${intento}/${CONFIG.maxRetries})...`);
+            // 🔻 'domcontentloaded' en vez de 'networkidle2': ESPN tiene ads,
+            // analytics y widgets que mantienen la red "ocupada" indefinidamente,
+            // así que 'networkidle2' casi nunca se cumple y agota el timeout.
+            // Con 'domcontentloaded' avanzamos en cuanto el HTML base está listo,
+            // y luego usamos waitForSelector (más abajo) para esperar el
+            // contenido dinámico específico que sí necesitamos.
             await page.goto(url, {
-                waitUntil: 'networkidle2',
+                waitUntil: 'domcontentloaded',
                 timeout: CONFIG.navigationTimeoutMs,
             });
             return;
@@ -343,7 +349,7 @@ async function scrapearPartidosEnVivo() {
         await sleep(CONFIG.contentWaitMs);
 
         try {
-            await page.waitForSelector('a[href*="/futbol/equipo/"]', { timeout: 10000 });
+            await page.waitForSelector('a[href*="/futbol/equipo/"]', { timeout: 20000 });
             log('✅', 'Tarjetas de partidos detectadas.');
             debug.tarjetasDetectadas = true;
         } catch {
